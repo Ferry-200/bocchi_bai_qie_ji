@@ -25,6 +25,7 @@ static LOCKS: LazyLock<DashMap<String, Mutex<()>>> = LazyLock::new(DashMap::new)
 
 pub fn gpt_plugin() -> Plugin {
     let mut plugin = Plugin::new("GPT 插件", "使用 DeepSeek API 进行对话");
+
     for (description, command, max_tokens, reply_image) in [
         ("提问并获得文本答复", "#gpt", Some(512), false), // gpt 使用文本输出，需要文本内容较短
         ("提问并获得图片答复", "#igpt", None, true),      // igpt 使用图片输出，不需要限制 token
@@ -33,14 +34,15 @@ pub fn gpt_plugin() -> Plugin {
             description,
             i32::default(),
             Rule::on_group_message() & Rule::on_prefix(command),
-            move |ctx| {
-                Box::pin(call_deepseek_api(
-                    ctx.caller,
-                    ctx.event,
+            move |ctx| async move {
+                call_deepseek_api(
+                    ctx.caller.as_ref(),
+                    ctx.event.as_ref(),
                     command,
                     max_tokens,
                     reply_image,
-                ))
+                )
+                .await
             },
         )
     }
@@ -48,32 +50,33 @@ pub fn gpt_plugin() -> Plugin {
         "清除 GPT 的消息历史",
         i32::default(),
         Rule::on_group_message() & Rule::on_exact_match("#clear_gpt"),
-        move |ctx| {
-            Box::pin(async move {
-                let rw = database().rw_transaction()?;
-                for command in ["#gpt", "#igpt"] {
-                    let cache_key = format!("{}_{:?}_{}", command, ctx.event.group_id(), ctx.event.user_id());
-                    rw.remove::<Memory>(Memory::new(cache_key))?;
-                }
-                rw.commit()?;
-                ctx.caller
-                    .send_msg(SendMsgParams {
-                        message_type: None,
-                        user_id: Some(ctx.event.user_id()),
-                        group_id: ctx.event.group_id(),
-                        message: MessageContent::Segment(vec![
-                            MessageSegment::At {
-                                qq: ctx.event.user_id().to_string(),
-                            },
-                            MessageSegment::Text {
-                                text: " GPT 消息历史已清除".to_string(),
-                            },
-                        ]),
-                        auto_escape: true,
-                    })
-                    .await?;
-                Ok(true)
-            })
+        move |ctx| async move {
+            // 上面 matcher 条件写了 group_message，理论上可以直接拿到 group_id
+            // 但为了保证 cache_key 的兼容性，还是使用 try_group_id().ok() 拿到 Option<u64> 使用
+            let (user_id, optional_group_id) = (ctx.event.user_id(), ctx.event.try_group_id().ok());
+            let rw = database().rw_transaction()?;
+            for command in ["#gpt", "#igpt"] {
+                let cache_key = format!("{}_{:?}_{}", command, optional_group_id, user_id);
+                rw.remove::<Memory>(Memory::new(cache_key))?;
+            }
+            rw.commit()?;
+            ctx.caller
+                .send_msg(SendMsgParams {
+                    message_type: None,
+                    user_id: Some(user_id),
+                    group_id: optional_group_id,
+                    message: MessageContent::Segment(vec![
+                        MessageSegment::At {
+                            qq: user_id.to_string(),
+                        },
+                        MessageSegment::Text {
+                            text: " GPT 消息历史已清除".to_string(),
+                        },
+                    ]),
+                    auto_escape: true,
+                })
+                .await?;
+            Ok(true)
         },
     );
     plugin
@@ -96,7 +99,8 @@ async fn call_deepseek_api(
             emoji_id: Emoji::敬礼_1.id(),
         })
         .await?;
-    let cache_key = format!("{}_{:?}_{}", command, event.group_id(), event.user_id());
+    let (user_id, optional_group_id) = (event.user_id(), event.try_group_id().ok());
+    let cache_key = format!("{}_{:?}_{}", command, optional_group_id, user_id);
     let lock = LOCKS.entry(cache_key.clone()).or_default();
     let _guard = lock.lock().await;
     let r = database().r_transaction()?;
@@ -176,8 +180,8 @@ async fn call_deepseek_api(
     caller
         .send_msg(SendMsgParams {
             message_type: None,
-            user_id: Some(event.user_id()),
-            group_id: event.group_id(),
+            user_id: Some(user_id),
+            group_id: optional_group_id,
             message: MessageContent::Segment(vec![
                 MessageSegment::Reply {
                     id: event.message_id().to_string(),

@@ -10,12 +10,12 @@ pub use ws::WsAdapter;
 use crate::{chain::MatchUnion, plugin::Plugin, schema::*};
 
 #[async_trait]
-pub trait Connector: Sync {
+pub trait Connector: Send + Sync {
     async fn spawn(mut self: Box<Self>, plugins: Vec<Plugin>) -> Result<()>;
 }
 
 #[async_trait]
-pub trait Caller: Sync {
+pub trait Caller: Send + Sync {
     async fn call(&self, request: ApiRequest) -> Result<ApiResponse>;
     async fn get_login_info(&self) -> Result<GetLoginInfoResult>;
     async fn send_private_msg(&self, param: SendPrivateMsgParams) -> Result<SendMsgResult>;
@@ -24,8 +24,11 @@ pub trait Caller: Sync {
     async fn delete_msg(&self, param: DeleteMsgParams) -> Result<serde_json::Value>;
     async fn get_msg(&self, param: GetMsgParams) -> Result<GetMsgResult>;
     async fn get_forward_msg(&self, param: GetForwardMsgParams) -> Result<GetForwardMsgResult>;
+
     #[cfg(feature = "napcat")]
     async fn set_msg_emoji_like(&self, param: SetMsgEmojiLikeParams) -> Result<serde_json::Value>;
+    #[cfg(feature = "napcat")]
+    async fn send_forward_msg(&self, param: SendForwardMsgParams) -> Result<SendMsgResult>;
 }
 
 #[async_trait]

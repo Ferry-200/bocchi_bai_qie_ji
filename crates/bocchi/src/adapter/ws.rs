@@ -84,21 +84,18 @@ impl Connector for WsAdapter {
                                     error!("Received response with unknown request ID: {text}");
                                 }
                             } else if let Ok(event) = serde_json::from_str::<Event>(&text) {
-                                info!("Receive event: {event:?}");
-                                let self_clone = self.clone();
+                                debug!("Receive event: {event:?}");
+                                let context = Context {
+                                    caller: self.clone(),
+                                    event: Arc::new(event),
+                                    plugins: plugins.clone(),
+                                };
                                 let match_unions_clone = match_unions.clone();
-                                let plugins_clone = plugins.clone();
                                 tokio::spawn(async move {
                                     // 按照优先级顺序匹配并处理事件
                                     for match_union in match_unions_clone.iter() {
-                                        if match_union.matcher.is_match(&event) {
-                                            match (*match_union.handler)(Context {
-                                                caller: self_clone.as_ref(),
-                                                event: &event,
-                                                plugins: &plugins_clone,
-                                            })
-                                            .await
-                                            {
+                                        if match_union.matcher.is_match(&context.event) {
+                                            match (*match_union.handler)(context.clone()).await {
                                                 // 事件的返回值被视为中断标志，如果返回 true
                                                 Err(e) => error!("Failed to handle event with : {e:?}"),
                                                 Ok(true) => break,
@@ -193,6 +190,11 @@ impl Caller for WsAdapter {
     #[cfg(feature = "napcat")]
     async fn set_msg_emoji_like(&self, param: SetMsgEmojiLikeParams) -> Result<serde_json::Value> {
         set_msg_emoji_like(self, param).await
+    }
+
+    #[cfg(feature = "napcat")]
+    async fn send_forward_msg(&self, param: SendForwardMsgParams) -> Result<SendMsgResult> {
+        send_forward_msg(self, param).await
     }
 }
 

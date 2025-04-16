@@ -26,14 +26,14 @@ fn init() {
 async fn main() -> Result<()> {
     init();
     let mut bot_instance = Bot::connect("ws://localhost:3001").await?;
-    bot_instance.use_build_in_handler();
+    bot_instance.use_builtin_handler();
     bot_instance.register_plugin(plugin::bonus_plugin());
     bot_instance.register_plugin(plugin::echo_plugin());
     bot_instance.register_plugin(plugin::gpt_plugin());
     bot_instance.register_plugin(plugin::repeat_plugin());
     bot_instance.register_plugin(plugin::hacker_news_plugin());
     bot_instance.register_plugin(plugin::what_to_eat_plugin());
-    bot_instance.register_plugin(plugin::video_detail_plugin());
+    bot_instance.register_plugin(plugin::url_detail_plugin());
     bot_instance.register_plugin(plugin::select_plugin());
     bot_instance.start().await
 }
